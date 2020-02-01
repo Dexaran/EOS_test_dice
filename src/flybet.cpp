@@ -49,7 +49,6 @@ struct [[eosio::table]] globalstate
         uint64_t id;
 
         uint64_t last_room_id;
-        //std::vector<room> rooms;
 
         uint64_t primary_key() const { return id; }
         EOSLIB_SERIALIZE( globalstate, (id)(last_room_id))
@@ -173,6 +172,18 @@ void reveal(eosio::name player, uint64_t room_id, uint64_t secret, uint64_t seed
           }
      }
 
+     bool finish_available = true; // Check if all the players have already submitted their SECRET hashes.
+     for (uint8_t i = 0; i < room_itr->max_players; i++)
+     {
+          if(room_itr->players[i].status != player_state::revealed)
+          {
+               finish_available = false;
+          }
+     }
+     if(finish_available)
+     {
+          pay_and_refresh_room(room_id);
+     }
 }
 
 [[eosio::on_notify("eosio.token::transfer")]]
@@ -249,7 +260,7 @@ void clearroom()
      {
           auto room_itr = rooms_table.find(room_id);
 
-          return room_itr->entropy%100;
+          return room_itr->entropy%1000;
      }
 
 };
