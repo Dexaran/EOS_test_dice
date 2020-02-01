@@ -34,6 +34,7 @@ struct [[eosio::table]] rooms
                                                      // if he discloses his hashed numbers.
           std::vector<player>   players;
           uint64_t              bet;
+          uint64_t              entropy;
 
           uint64_t primary_key() const { return id; }
           EOSLIB_SERIALIZE( rooms, (id)(max_players)(disclosure_refund_ratio)(players)(bet))
@@ -70,6 +71,7 @@ roomstable   rooms_table;
 void createroom(uint8_t max_players, uint64_t bet, eosio::name creator)
 {
      require_auth(creator);
+     eosio_assert(max_players < 3, "Temporarily restricting the max number of players to 2");
 
      auto _state = global_state.find(0);
 
@@ -90,14 +92,63 @@ void createroom(uint8_t max_players, uint64_t bet, eosio::name creator)
 }
 
 [[eosio::action]]
-void roll(uint64_t room_id, checksum256 hash)
+void closeroom(uint64_t room_id)
 {
-     
+    // TODO: write the code.
 }
 
+
+/** roll() - players submit entropy and invoke payments by calling this function
+/* hash - the hash of SEED and SECRET variables calculated offchain
+*/
 [[eosio::action]]
-void reveal()
+void roll(eosio::name player, uint64_t room_id, checksum256 hash)
 {
+     require_auth(player);
+
+     auto room_itr = rooms_table.find(room_id);
+
+     for (uint8_t i = 0; i < room_itr->max_players; i++)
+     {
+          if(player == room_itr->players[i].account)
+          {
+               rooms_table.modify(room_itr, get_self(), [&](auto& row) {
+                    row.players[i].bet_hash = hash;
+               });
+          }
+     }
+}
+
+/** reveal() - after all the SECRETs were submitted players reveal their hashed entropy
+/*
+*/
+[[eosio::action]]
+void reveal(eosio::name player, uint64_t room_id, uint64_t secret, uint64_t seed)
+{
+     require_auth(player);
+
+     std::string _data = "" + secret + seed;
+
+          //@print
+          eosio::print(_data);
+
+     checksum256 hash = sha256(&_data[0], _data.size());
+
+          //@print
+          eosio::print(hash);
+
+     auto room_itr = rooms_table.find(room_id);
+
+     for (uint8_t i = 0; i < room_itr->max_players; i++)
+     {
+          if(player == room_itr->players[i].account)
+          {
+               eosio_assert(hash == room_itr->players[i].bet_hash, "Provided secret and seed does not match the provided sha256 hash");
+               rooms_table.modify(room_itr, get_self(), [&](auto& row) {
+                    row.players[i].bet_hash = hash;
+               });
+          }
+     }
 
 }
 
@@ -154,10 +205,20 @@ void clearbalance()
      }
 }
 
+[[eosio::action]]
+void clearroom()
+{
+     auto e = rooms_table.find(0);
+     if(e != rooms_table.end())
+     {
+          rooms_table.erase(e);
+     }
+}
+
 };
 
 
-EOSIO_DISPATCH( flybet, (setup)(createroom)(roll)(reveal)(clearbalance)(clearglobal))
+EOSIO_DISPATCH( flybet, (setup)(createroom)(roll)(reveal)(closeroom)(clearbalance)(clearglobal)(clearroom))
 
 /* Deprecated in favor of eosio::on_notify(_action) usage
 extern "C" {
