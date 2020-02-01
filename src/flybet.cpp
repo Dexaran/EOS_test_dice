@@ -17,10 +17,14 @@ class [[eosio::contract("flybet")]] flybet : public contract {
         flybet( eosio::name receiver, eosio::name code, eosio::datastream<const char*> ds ): eosio::contract(receiver, code, ds), global_state(receiver, code.value), rooms_table(receiver, code.value), balances_table(receiver, code.value)
     {}
 
+//enum room_state { roll, reveal };
+enum player_state { init, rolled, revealed };
+
 struct [[eosio::class]] player
 {
      eosio::name  account;
      checksum256  bet_hash;
+     player_state status;
 };
 
 struct [[eosio::table]] rooms
@@ -114,6 +118,14 @@ void roll(eosio::name player, uint64_t room_id, checksum256 hash)
           {
                rooms_table.modify(room_itr, get_self(), [&](auto& row) {
                     row.players[i].bet_hash = hash;
+                    row.players[i].status   = player_state::rolled;
+               });
+
+               auto balances_itr = balances_table.find(player.value);
+
+               balances_table.modify(balances_itr, get_self(), [&](auto& row) {
+                    eosio_assert(row.balance.amount >= room_itr->bet, "Overdrawn balance");
+                    row.balance.amount -= room_itr->bet;
                });
           }
      }
@@ -127,6 +139,17 @@ void reveal(eosio::name player, uint64_t room_id, uint64_t secret, uint64_t seed
 {
      require_auth(player);
 
+     bool reveal_available = true; // Check if all the players have already submitted their SECRET hashes.
+     auto room_itr = rooms_table.find(room_id);
+     for (uint8_t i = 0; i < room_itr->max_players; i++)
+     {
+          if(! (room_itr->players[i].status == player_state::rolled || room_itr->players[i].status == player_state::revealed) )
+          {
+               reveal_available = false;
+          }
+     }
+     eosio_assert(reveal_available, "Wait for all players to roll and submit their entropy hashes");
+
      std::string _data = "" + secret + seed;
 
           //@print
@@ -137,15 +160,15 @@ void reveal(eosio::name player, uint64_t room_id, uint64_t secret, uint64_t seed
           //@print
           eosio::print(hash);
 
-     auto room_itr = rooms_table.find(room_id);
 
      for (uint8_t i = 0; i < room_itr->max_players; i++)
      {
           if(player == room_itr->players[i].account)
           {
-               eosio_assert(hash == room_itr->players[i].bet_hash, "Provided secret and seed does not match the provided sha256 hash");
+               eosio_assert(hash == room_itr->players[i].bet_hash, "Provided secret and seed do not match the provided sha256 hash");
                rooms_table.modify(room_itr, get_self(), [&](auto& row) {
-                    row.players[i].bet_hash = hash;
+                    row.players[i].status = player_state::revealed;
+                    row.entropy += secret;
                });
           }
      }
@@ -214,6 +237,20 @@ void clearroom()
           rooms_table.erase(e);
      }
 }
+
+     private:
+
+     void pay_and_refresh_room(uint64_t room_id)
+     {
+
+     }
+
+     uint64_t rng(uint64_t room_id)
+     {
+          auto room_itr = rooms_table.find(room_id);
+
+          return room_itr->entropy%100;
+     }
 
 };
 
